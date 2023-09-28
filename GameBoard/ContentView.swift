@@ -14,6 +14,12 @@ import Combine
 
 // MARK: - View model for handling communication between the UI and ARView.
 class ViewModel: ObservableObject {
+    // Boolean to track if robot is walking.
+    @Published var robotIsWalking: Bool = false
+    
+    // Message of game status.
+    @Published var gameStatus: String = "START"
+
     // For handling different button presses.
     enum UISignal {
         case reset
@@ -21,7 +27,7 @@ class ViewModel: ObservableObject {
         case rotateCCW
         case rotateCW
     }
-
+    
     let uiSignal = PassthroughSubject<UISignal, Never>()
 }
 
@@ -35,6 +41,11 @@ struct ContentView : View {
             // AR View.
             ARViewContainer(viewModel: viewModel)
 
+            Text(viewModel.gameStatus)
+                .font(.system(.largeTitle))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(40)
+            
             // Reset button.
             Button {
                 viewModel.uiSignal.send(.reset)
@@ -53,7 +64,7 @@ struct ContentView : View {
                 Button {
                     viewModel.uiSignal.send(.moveForward)
                 } label: {
-                    buttonIcon("arrow.up", color: .blue)
+                    buttonIcon(viewModel.robotIsWalking ? "stop.fill" : "arrow.up", color: .blue)
                 }
                 
                 Spacer()
@@ -109,20 +120,11 @@ class SimpleARView: ARView {
 
     var planeAnchor: AnchorEntity?
 
-
-    // TODO: Add custom entities here.
-
     var robotEntity: CustomModelEntity!
-    
     var boardEntity: BoardEntity!
-
     var cubeEntity: CubeEntity!
-
     var sphereEntity: SphereEntity!
     
-    //////////////////////////////////////////////////////////////
-    
-
     init(frame: CGRect, viewModel: ViewModel) {
         self.viewModel = viewModel
         super.init(frame: frame)
@@ -153,11 +155,35 @@ class SimpleARView: ARView {
         configuration.environmentTexturing = .automatic
         arView.renderOptions = [.disableDepthOfField, .disableMotionBlur]
         arView.session.run(configuration)
-
+        
+        // Called every frame.
+        scene.subscribe(to: SceneEvents.Update.self) { event in
+            // Call renderLoop method on every frame.
+            self.renderLoop()
+        }.store(in: &subscriptions)
+        
         // Process UI signals.
         viewModel.uiSignal.sink { [weak self] in
             self?.processUISignal($0)
         }.store(in: &subscriptions)
+        
+        // Respond to collision events 💥.
+        arView.scene.subscribe(to: CollisionEvents.Began.self) { [weak self] event in
+            guard let self else { return }
+            
+            // If entity with name obstacle1 collides with anything.
+            if event.entityA.name == "obstacle1" || event.entityB.name == "obstacle1" {
+
+                // TODO: Add logic for collision.
+                print("💥 something is colliding with obstacle1")
+                viewModel.gameStatus = "COLLISION"
+            }
+
+        }.store(in: &subscriptions)
+
+
+        // Uncomment to show collision 💥 debug .
+        // arView.debugOptions = [.showPhysics]
     }
 
     func processUISignal(_ signal: ViewModel.UISignal) {
@@ -178,7 +204,7 @@ class SimpleARView: ARView {
         // Setup custom entities.
         robotEntity = CustomModelEntity(name: "mrRobot", usdzModelName: "toy_robot_vintage")
 
-        boardEntity = BoardEntity(name: "gameBoard", length: 0.25, imageName: "checker-board.png")
+        boardEntity = BoardEntity(name: "gameBoard", length: 1.0, imageName: "checker-board.png")
 
         cubeEntity = CubeEntity(name: "obstacle1", size: 0.10, color: UIColor.red)
         
@@ -187,52 +213,92 @@ class SimpleARView: ARView {
     
     // Reset plane anchor and position entities.
     func resetGameBoard() {
+        // Reset plane anchor. //
         planeAnchor?.removeFromParent()
         planeAnchor = nil
-        
         planeAnchor = AnchorEntity(plane: [.horizontal])
         planeAnchor?.orientation = simd_quatf(angle: .pi / 2, axis: [0,1,0])
         arView.scene.addAnchor(planeAnchor!)
-        
+
+
+        // Rest robot entity. //
         planeAnchor!.addChild(robotEntity)
         robotEntity.position = [0, 0, 0]
 
+        // .. IMPORTANT: 💥 Generate collision shape for robot.
+        robotEntity.generateCollisionShapes(recursive: true)
+
+        // .. Stop any animation.
+        robotEntity.animate(false)
+        
+
+        // Reset board entity. //
         planeAnchor!.addChild(boardEntity)
         boardEntity.position = [0, 0, 0]
 
+
+        // Reset cube entity. //
         planeAnchor!.addChild(cubeEntity)
         cubeEntity.position.y = 0.05
         cubeEntity.position.z = 0.3
 
+        // .. Generate collision shape cube entity.
+        cubeEntity.generateCollisionShapes(recursive: true)
+        
+
+        // Reset sphere entity. //
         planeAnchor!.addChild(sphereEntity)
         sphereEntity.position.y = 0.1
         sphereEntity.position.z = 0.3
         sphereEntity.position.x = 0.4
+
+        // .. Generate collision shape cube sphere entity.
+        sphereEntity.generateCollisionShapes(recursive: true)
+        
+
+        // Reset game status message.
+        viewModel.gameStatus = "START"
     }
     
-
-    // TODO: Implement control to move player forward.
     func moveForwardPressed() {
         print("👇 Did press move forward")
+
+        viewModel.robotIsWalking.toggle()
+        
+        if viewModel.robotIsWalking {
+            robotEntity.animate(true)
+            viewModel.gameStatus = "WALKING"
+        } else {
+            robotEntity.animate(false)
+            viewModel.gameStatus = "STOPPED"
+        }
     }
 
-
-    // TODO: Implement control to rotate CCW.
     func rotateCCWPressed() {
         print("👇 Did press rotate CCW")
-
+        
+        let orientation = simd_quatf(angle: Float.pi / 2, axis: [0,1,0])
+        robotEntity.transform.matrix *= Transform(rotation: orientation).matrix
     }
 
-
-    // TODO: Implement control to rotate CW.
     func rotateCWPressed() {
         print("👇 Did press rotate CW")
-
+        
+        let orientation = simd_quatf(angle: -Float.pi / 2, axis: [0,1,0])
+        robotEntity.transform.matrix *= Transform(rotation: orientation).matrix
+    }
+    
+    func renderLoop() {
+        if viewModel.robotIsWalking {
+            robotEntity.transform.matrix *= Transform(translation: [0,0,0.001]).matrix
+        }
     }
 }
 
 
-// Classes for custom entities.
+//////////////////////////////////
+// Classes for custom entities. //
+//////////////////////////////////
 
 // MARK: - CustomModelEntity
 class CustomModelEntity: Entity {
@@ -241,12 +307,6 @@ class CustomModelEntity: Entity {
     init(name: String, usdzModelName: String) {
         model = try! Entity.load(named: usdzModelName)
         model.name = name
-        model.generateCollisionShapes(recursive: true)
-
-        // Play animation if one exists
-        if let animation = model.availableAnimations.first {
-            model.playAnimation(animation.repeat())
-        }
 
         super.init()
 
