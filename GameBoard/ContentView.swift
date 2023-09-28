@@ -220,11 +220,14 @@ class SimpleARView: ARView {
         planeAnchor?.orientation = simd_quatf(angle: .pi / 2, axis: [0,1,0])
         arView.scene.addAnchor(planeAnchor!)
 
-
-        // Rest robot entity. //
+        
+        
+        // Reset robot entity. //
         planeAnchor!.addChild(robotEntity)
-        robotEntity.position = [0, 0, 0]
 
+        // .. reset transform.
+        robotEntity.transform = Transform()
+        
         // .. IMPORTANT: 💥 Generate collision shape for robot.
         robotEntity.generateCollisionShapes(recursive: true)
 
@@ -255,6 +258,9 @@ class SimpleARView: ARView {
         // .. Generate collision shape cube sphere entity.
         sphereEntity.generateCollisionShapes(recursive: true)
         
+
+        // Reset robot walking state.
+        viewModel.robotIsWalking = false
 
         // Reset game status message.
         viewModel.gameStatus = "START"
